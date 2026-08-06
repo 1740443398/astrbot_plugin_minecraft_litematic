@@ -1,0 +1,173 @@
+import os
+import traceback
+import asyncio
+from typing import Dict, Optional, Tuple, List
+from astrbot import logger
+from astrbot.api.event import AstrMessageEvent, MessageChain
+from litemapy import Schematic
+from ..services.file_manager import FileManager
+from ..services.category_manager import CategoryManager
+from ..services.lang_manager import LangManager
+from ..core.material.material import Material
+from ..utils.types import CategoryType, FilePath, BlockCounts, EntityCounts, MessageResponse, BlockId
+from ..utils.exceptions import (
+    CategoryNotFoundError, 
+    FileNotFoundError, 
+    LitematicPluginError,
+    InvalidArgumentError
+)
+from ..utils.logging_utils import log_error, log_operation
+
+class MaterialCommand:
+    # 数量单位常量
+    STACK_SIZE: int = 64  # 一组
+    SHULKER_BOX_SIZE: int = 27 * 64  # 一盒（潜影盒）= 27组 = 1728个
+    CHEST_OF_SHULKERS_SIZE: int = 54 * 27 * 64  # 一箱盒（一箱潜影盒）= 54盒 = 93,312个
+
+    def __init__(self, file_manager: FileManager, category_manager: CategoryManager, lang_manager: LangManager) -> None:
+        self.file_manager: FileManager = file_manager
+        self.category_manager: CategoryManager = category_manager
+        self.lang_manager: LangManager = lang_manager
+
+    def _format_count(self, count: int) -> str:
+        """
+        格式化数量，添加组、盒、箱盒的换算
+        四舍五入后不满0.5的单位会被省略
+
+        Args:
+            count: 物品数量
+
+        Returns:
+            str: 格式化后的数量字符串
+        """
+        stacks = count / self.STACK_SIZE
+        shulker_boxes = count / self.SHULKER_BOX_SIZE
+        chest_of_shulkers = count / self.CHEST_OF_SHULKERS_SIZE
+
+        parts = [f"{count}个"]
+
+        if stacks >= 0.5:
+            parts.append(f"{stacks:.2f}组")
+        if shulker_boxes >= 0.5:
+            parts.append(f"{shulker_boxes:.2f}盒")
+        if chest_of_shulkers >= 0.5:
+            parts.append(f"{chest_of_shulkers:.2f}箱盒")
+
+        return "-".join(parts)
+    
+    async def execute(self, event: AstrMessageEvent, category: CategoryType = "", filename: str = "") -> MessageResponse:
+        """
+        分析litematic文件所需材料
+        使用方法：
+        /投影材料 分类名 文件名 - 分析指定分类下文件所需的材料
+        
+        Args:
+            event: 消息事件
+            category: 分类名称，默认为空字符串
+            filename: 文件名，默认为空字符串
+            
+        Yields:
+            MessageChain: 响应消息
+        """
+        # 验证参数
+        if not category or not filename:
+            yield event.plain_result("请指定分类和文件名，例如：/投影材料 建筑 house.litematic")
+            return
+        
+        try:
+            # 加载litematic文件
+            yield event.plain_result("正在分析材料清单，请稍候...")
+            
+            # 获取文件路径 - 使用异步方法
+            file_path: FilePath = await self.file_manager.get_litematic_file_async(category, filename)
+            
+            # 使用Material类分析文件 - 由于这是CPU密集型操作，使用线程池运行
+            schematic, block_counts, entity_counts, tile_counts = await asyncio.to_thread(
+                self._analyze_material, file_path
+            )
+            
+            # 使用Material类分析文件
+            material_analyzer: Material = Material("材料分析", 0)
+            
+            # 获取方块和实体统计
+            block_counts: BlockCounts = material_analyzer.block_collection(schematic)
+            entity_counts: EntityCounts = material_analyzer.entity_collection(schematic)
+            tile_counts: Dict[str, int] = material_analyzer.tile_collection(schematic)
+            
+            # 格式化结果
+            result: str = f"【{os.path.basename(file_path)}】材料清单：\n\n"
+            
+            # 添加方块信息
+            if block_counts:
+                result += "方块材料：\n"
+                sorted_blocks: List[Tuple[BlockId, int]] = sorted(block_counts.items(), key=lambda item: item[1], reverse=True)
+                for block_id, count in sorted_blocks:
+                    # 使用翻译功能翻译方块ID
+                    translated_name = self.lang_manager.translate_block(block_id)
+                    result += f"- {translated_name}: {self._format_count(count)}\n"
+            else:
+                result += "无方块材料\n"
+            
+            # 添加实体信息
+            if entity_counts:
+                result += "\n实体：\n"
+                sorted_entities: List[Tuple[str, int]] = sorted(entity_counts.items(), key=lambda item: item[1], reverse=True)
+                for entity_id, count in sorted_entities:
+                    # 使用翻译功能翻译实体ID
+                    translated_name = self.lang_manager.translate_entity(entity_id)
+                    result += f"- {translated_name}: {self._format_count(count)}\n"
+            
+            # 添加方块实体信息
+            if tile_counts:
+                result += "\n方块实体：\n"
+                sorted_tiles: List[Tuple[str, int]] = sorted(tile_counts.items(), key=lambda item: item[1], reverse=True)
+                for tile_id, count in sorted_tiles:
+                    # 确保正确显示，处理不同类型的tile_id
+                    if isinstance(tile_id, tuple) and len(tile_id) > 0:
+                        # 使用翻译功能翻译方块实体ID
+                        translated_name = self.lang_manager.translate_block(tile_id[0])
+                        result += f"- {translated_name}: {self._format_count(count)}\n"
+                    else:
+                        # 使用翻译功能翻译方块实体ID
+                        translated_name = self.lang_manager.translate_block(tile_id)
+                        result += f"- {translated_name}: {self._format_count(count)}\n"
+            
+            log_operation("分析材料", True, {"category": category, "filename": filename})
+            yield event.plain_result(result)
+            
+        except FileNotFoundError as e:
+            log_error(e)
+            yield event.plain_result(e.message)
+        except CategoryNotFoundError as e:
+            log_error(e)
+            yield event.plain_result(e.message)
+        except InvalidArgumentError as e:
+            log_error(e)
+            yield event.plain_result(e.message)
+        except LitematicPluginError as e:
+            log_error(e, extra_info={"category": category, "filename": filename})
+            yield event.plain_result(f"分析材料失败: {e.message}")
+        except Exception as e:
+            error_details = {"category": category, "filename": filename, "error": str(e), "traceback": traceback.format_exc()}
+            log_error(e, extra_info=error_details)
+            yield event.plain_result(f"分析材料时出现错误: {str(e)}")
+
+    def _analyze_material(self, file_path: FilePath) -> Tuple[Schematic, BlockCounts, EntityCounts, Dict[str, int]]:
+        """
+        分析Litematic文件中的材料（CPU密集型操作，在线程池中运行）
+        
+        Args:
+            file_path: Litematic文件路径
+            
+        Returns:
+            Tuple[Schematic, BlockCounts, EntityCounts, Dict[str, int]]: 结构体及统计数据
+        """
+        schematic: Schematic = Schematic.load(file_path)
+        material_analyzer: Material = Material("材料分析", 0)
+        
+        # 获取方块和实体统计
+        block_counts: BlockCounts = material_analyzer.block_collection(schematic)
+        entity_counts: EntityCounts = material_analyzer.entity_collection(schematic)
+        tile_counts: Dict[str, int] = material_analyzer.tile_collection(schematic)
+        
+        return schematic, block_counts, entity_counts, tile_counts 

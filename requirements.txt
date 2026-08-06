@@ -1,0 +1,4 @@
+litemapy
+pyvista
+numpy
+pillow

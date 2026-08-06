@@ -1,0 +1,12 @@
+{
+    "selected_pack": "vanilla",
+    "available_packs": [
+        "vanilla"
+    ],
+    "texture_size": {
+        "vanilla": 16
+    },
+    "description": {
+        "vanilla": "原版材质包，16x16分辨率"
+    }
+}
