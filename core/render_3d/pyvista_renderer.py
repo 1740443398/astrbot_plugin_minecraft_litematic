@@ -1,4 +1,5 @@
 import os
+import gc
 import numpy as np
 import pyvista as pv
 from typing import Dict, List, Tuple, Any, Optional
@@ -38,7 +39,7 @@ class PyVistaRenderer:
         # 渲染配置
         self.config = {
             'background_color': (0.95, 0.95, 0.95),  # 浅灰色背景
-            'window_size': [800, 600],             # 窗口大小
+            'window_size': [7680, 4320],             # 窗口大小，默认 8K
             'camera_position': 'iso',              # 默认相机位置
             'show_axes': True,                     # 显示坐标轴
             'lighting': True,                      # 启用光照
@@ -156,7 +157,7 @@ class PyVistaRenderer:
             # 渲染场景
             if reuse_plotter:
                 plotter.render()
-            img = plotter.screenshot(return_img=True)
+            img = plotter.screenshot(return_img=True, scale=1)
             if not reuse_plotter:
                 plotter.close()
 
@@ -164,10 +165,19 @@ class PyVistaRenderer:
             img = np.array(img, copy=True)
             pil_img = Image.fromarray(img)
 
+            # 高分辨率渲染后释放内存，防止 GPU 显存泄漏
+            del img
+            gc.collect()
+
             return pil_img
 
+        except MemoryError:
+            print("渲染场景时内存不足，请降低分辨率或减少模型复杂度")
+            gc.collect()
+            return None
         except Exception as e:
             print(f"渲染场景时出错: {e}")
+            gc.collect()
             return None
 
     def _add_meshes(self, plotter: pv.Plotter) -> None:
@@ -217,16 +227,16 @@ class PyVistaRenderer:
 
     def _enable_texture_repeat(self, texture: pv.Texture) -> None:
         try:
-            if hasattr(texture, "repeat"):
-                texture.repeat = True
-                return
-            if hasattr(texture, "SetRepeat"):
-                texture.SetRepeat(True)
-                return
-            if hasattr(texture, "RepeatOn"):
-                texture.RepeatOn()
+            texture.repeat = True
+            texture.interpolate = False
         except Exception:
-            return
+            try:
+                if hasattr(texture, "SetRepeat"):
+                    texture.SetRepeat(True)
+                if hasattr(texture, "SetInterpolate"):
+                    texture.SetInterpolate(False)
+            except Exception:
+                return
 
     def close(self) -> None:
         if self.plotter is None:
@@ -238,6 +248,7 @@ class PyVistaRenderer:
         self.plotter = None
         self._plotter_window_size = None
         self._plotter_background = None
+        gc.collect()
 
     def set_config(self, config: Dict[str, Any]) -> None:
         """

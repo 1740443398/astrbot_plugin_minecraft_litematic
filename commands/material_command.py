@@ -78,59 +78,16 @@ class MaterialCommand:
             # 加载litematic文件
             yield event.plain_result("正在分析材料清单，请稍候...")
             
-            # 获取文件路径 - 使用异步方法
+            # 获取文件路径
             file_path: FilePath = await self.file_manager.get_litematic_file_async(category, filename)
             
-            # 使用Material类分析文件 - 由于这是CPU密集型操作，使用线程池运行
+            # 使用Material类分析文件
             schematic, block_counts, entity_counts, tile_counts = await asyncio.to_thread(
                 self._analyze_material, file_path
             )
             
-            # 使用Material类分析文件
-            material_analyzer: Material = Material("材料分析", 0)
-            
-            # 获取方块和实体统计
-            block_counts: BlockCounts = material_analyzer.block_collection(schematic)
-            entity_counts: EntityCounts = material_analyzer.entity_collection(schematic)
-            tile_counts: Dict[str, int] = material_analyzer.tile_collection(schematic)
-            
             # 格式化结果
-            result: str = f"【{os.path.basename(file_path)}】材料清单：\n\n"
-            
-            # 添加方块信息
-            if block_counts:
-                result += "方块材料：\n"
-                sorted_blocks: List[Tuple[BlockId, int]] = sorted(block_counts.items(), key=lambda item: item[1], reverse=True)
-                for block_id, count in sorted_blocks:
-                    # 使用翻译功能翻译方块ID
-                    translated_name = self.lang_manager.translate_block(block_id)
-                    result += f"- {translated_name}: {self._format_count(count)}\n"
-            else:
-                result += "无方块材料\n"
-            
-            # 添加实体信息
-            if entity_counts:
-                result += "\n实体：\n"
-                sorted_entities: List[Tuple[str, int]] = sorted(entity_counts.items(), key=lambda item: item[1], reverse=True)
-                for entity_id, count in sorted_entities:
-                    # 使用翻译功能翻译实体ID
-                    translated_name = self.lang_manager.translate_entity(entity_id)
-                    result += f"- {translated_name}: {self._format_count(count)}\n"
-            
-            # 添加方块实体信息
-            if tile_counts:
-                result += "\n方块实体：\n"
-                sorted_tiles: List[Tuple[str, int]] = sorted(tile_counts.items(), key=lambda item: item[1], reverse=True)
-                for tile_id, count in sorted_tiles:
-                    # 确保正确显示，处理不同类型的tile_id
-                    if isinstance(tile_id, tuple) and len(tile_id) > 0:
-                        # 使用翻译功能翻译方块实体ID
-                        translated_name = self.lang_manager.translate_block(tile_id[0])
-                        result += f"- {translated_name}: {self._format_count(count)}\n"
-                    else:
-                        # 使用翻译功能翻译方块实体ID
-                        translated_name = self.lang_manager.translate_block(tile_id)
-                        result += f"- {translated_name}: {self._format_count(count)}\n"
+            result: str = self._format_material_result(file_path, block_counts, entity_counts, tile_counts)
             
             log_operation("分析材料", True, {"category": category, "filename": filename})
             yield event.plain_result(result)
@@ -170,4 +127,71 @@ class MaterialCommand:
         entity_counts: EntityCounts = material_analyzer.entity_collection(schematic)
         tile_counts: Dict[str, int] = material_analyzer.tile_collection(schematic)
         
-        return schematic, block_counts, entity_counts, tile_counts 
+        return schematic, block_counts, entity_counts, tile_counts
+
+    def _format_material_result(self, file_path: str, block_counts: BlockCounts,
+                                entity_counts: EntityCounts, tile_counts: Dict[str, int]) -> str:
+        """
+        格式化材料分析结果
+        
+        Args:
+            file_path: Litematic文件路径
+            block_counts: 方块统计
+            entity_counts: 实体统计
+            tile_counts: 方块实体统计
+            
+        Returns:
+            str: 格式化后的材料清单字符串
+        """
+        result: str = f"【{os.path.basename(file_path)}】材料清单：\n\n"
+        
+        # 添加方块信息
+        if block_counts:
+            result += "方块材料：\n"
+            sorted_blocks: List[Tuple[BlockId, int]] = sorted(block_counts.items(), key=lambda item: item[1], reverse=True)
+            for block_id, count in sorted_blocks:
+                translated_name = self.lang_manager.translate_block(block_id)
+                result += f"- {translated_name}: {self._format_count(count)}\n"
+        else:
+            result += "无方块材料\n"
+        
+        # 添加实体信息
+        if entity_counts:
+            result += "\n实体：\n"
+            sorted_entities: List[Tuple[str, int]] = sorted(entity_counts.items(), key=lambda item: item[1], reverse=True)
+            for entity_id, count in sorted_entities:
+                translated_name = self.lang_manager.translate_entity(entity_id)
+                result += f"- {translated_name}: {self._format_count(count)}\n"
+        
+        # 添加方块实体信息
+        if tile_counts:
+            result += "\n方块实体：\n"
+            sorted_tiles: List[Tuple[str, int]] = sorted(tile_counts.items(), key=lambda item: item[1], reverse=True)
+            for tile_id, count in sorted_tiles:
+                if isinstance(tile_id, tuple) and len(tile_id) > 0:
+                    translated_name = self.lang_manager.translate_block(tile_id[0])
+                    result += f"- {translated_name}: {self._format_count(count)}\n"
+                else:
+                    translated_name = self.lang_manager.translate_block(tile_id)
+                    result += f"- {translated_name}: {self._format_count(count)}\n"
+        
+        return result
+
+    async def get_material_list(self, file_path: str) -> str:
+        """
+        获取材料清单字符串（供自动渲染等内部调用）
+        
+        Args:
+            file_path: Litematic文件路径
+            
+        Returns:
+            str: 格式化后的材料清单字符串
+        """
+        try:
+            _, block_counts, entity_counts, tile_counts = await asyncio.to_thread(
+                self._analyze_material, file_path
+            )
+            return self._format_material_result(file_path, block_counts, entity_counts, tile_counts)
+        except Exception as e:
+            logger.error(f"获取材料列表失败: {e}")
+            return "材料列表获取失败" 

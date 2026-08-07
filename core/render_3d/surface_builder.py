@@ -322,7 +322,7 @@ class SurfaceBuilder:
 
         for (x, y, z), block_id in cube_blocks.items():
             neighbor = (x + dx, y + dy, z + dz)
-            if neighbor in self.blocks:
+            if neighbor in cube_blocks:
                 continue
 
             key = self._get_cube_face_key(block_id, face_name)

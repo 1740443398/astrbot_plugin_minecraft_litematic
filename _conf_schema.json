@@ -31,8 +31,14 @@
     },
     "auto_render_resolution": {
         "description": "自动渲染时的分辨率",
-        "type": "str",
-        "hint": "自动渲染时的分辨率，支持 native（自适应）或固定分辨率如 800x600",
-        "default": "800x600"
+        "type": "string",
+        "hint": "自动渲染时的分辨率，支持 native（自适应）或固定分辨率。默认 7680x4320（8K），可设置 1920x1080（1080P）、2560x1440（2K）、3840x2160（4K）等。分辨率越高渲染图越清晰，但渲染时间越长且需要更多 GPU 显存，8K 渲染建议至少 8GB 显存",
+        "default": "7680x4320"
+    },
+    "show_auto_render_hint": {
+        "description": "是否显示自动渲染提示消息",
+        "type": "bool",
+        "hint": "关闭后将不再显示\"检测到.litematic文件，正在自动处理...\"等提示消息，直接静默发送渲染结果",
+        "default": true
     }
 }

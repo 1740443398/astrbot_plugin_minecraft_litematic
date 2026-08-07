@@ -5,7 +5,7 @@ from typing import List, Dict, AsyncGenerator, Optional, Tuple
 
 from astrbot import logger
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.message_components import Image, Node, Nodes, File
+from astrbot.api.message_components import Image, Node, Nodes, File, PlainText
 from astrbot.api.star import Star, register, Context
 from astrbot.core import AstrBotConfig
 
@@ -32,7 +32,7 @@ except ImportError:
     LITEMAPY_AVAILABLE = False
 
 
-@register("litematic", "kterna", "识别并分析Litematic文件的AstrBot插件", "1.5.0", "https://github.com/kterna/astrbot_plugin_litematic")
+@register("litematic", "kterna", "识别并分析Litematic文件的AstrBot插件", "1.8.0", "https://github.com/kterna/astrbot_plugin_litematic")
 class LitematicPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig) -> None:
         super().__init__(context)
@@ -122,7 +122,9 @@ class LitematicPlugin(Star):
         if not has_litematic:
             return
 
-        yield event.plain_result("检测到 .litematic 文件，正在自动处理和渲染，请稍候...")
+        show_hint = self.config.show_auto_render_hint()
+        if show_hint:
+            yield event.plain_result("检测到 .litematic 文件，正在自动处理和渲染，请稍候...")
 
         result = await self.upload_command.handle_auto_upload(event)
         if result is None:
@@ -130,7 +132,8 @@ class LitematicPlugin(Star):
             return
 
         target_path, category, filename = result
-        yield event.plain_result(f"已自动保存 {filename} 到 {category} 分类，正在渲染 3D 多视角...")
+        if show_hint:
+            yield event.plain_result(f"已自动保存 {filename} 到 {category} 分类，正在渲染 3D 多视角...")
 
         try:
             info_text = self._get_litematic_info(target_path, filename)
@@ -148,7 +151,14 @@ class LitematicPlugin(Star):
                 yield event.plain_result("渲染失败，无法生成 3D 视图")
                 return
 
+            # 获取材料列表
+            material_list = await self.material_command.get_material_list(target_path)
+
             nodes = []
+            # 将文件信息和材料列表作为第一个节点
+            info_text_full = f"【{filename}】\n{info_text}\n\n{material_list}"
+            nodes.append(Node(content=[PlainText(info_text_full)]))
+
             for view_name, img_path in render_results:
                 try:
                     nodes.append(Node(content=[Image.fromFileSystem(img_path)]))
@@ -158,9 +168,7 @@ class LitematicPlugin(Star):
             if nodes:
                 message = MessageChain()
                 message.chain.append(Nodes(nodes=nodes))
-                await event.send(message)
-
-            yield event.plain_result(f"【{filename}】\n{info_text}")
+                yield message
 
             self._cleanup_temp_files(render_results)
 

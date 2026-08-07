@@ -1,4 +1,5 @@
 import os
+import gc
 import asyncio
 import tempfile
 from typing import Dict, Any, Optional, List, Tuple
@@ -235,6 +236,7 @@ class Render3DManager:
 
             logger.info(f"GIF导出完成: {temp_gif_path}")
 
+            gc.collect()
             return temp_gif_path
             
         except RenderError:
@@ -409,12 +411,19 @@ class Render3DManager:
             front_camera = (center_x, center_y, bounds['max_z'] + distance)
             top_camera = (center_x, bounds['max_y'] + distance, center_z)
             side_camera = (bounds['max_x'] + distance, center_y, center_z)
+            # 侧上方视角：从侧面和上方各取一半距离，提供45度俯视侧面的透视效果
+            top_side_camera = (
+                bounds['max_x'] + distance * 0.7,
+                bounds['max_y'] + distance * 0.7,
+                center_z
+            )
 
             views = [
                 ("iso", iso_camera, (0, 1, 0)),
                 ("front", front_camera, (0, 1, 0)),
                 ("top", top_camera, (0, 0, -1)),
                 ("side", side_camera, (0, 1, 0)),
+                ("top_side", top_side_camera, (0, 1, 0)),
             ]
 
             results = []
@@ -445,6 +454,7 @@ class Render3DManager:
                     logger.warning(f"渲染 {view_name} 视角失败: {e}")
 
             renderer.close()
+            gc.collect()
             return results
 
         except RenderError:

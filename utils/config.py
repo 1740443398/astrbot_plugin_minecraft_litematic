@@ -43,7 +43,8 @@ class Config:
                 "use_block_models": self.astrbot_config.get("use_block_models", True),
                 "max_gif_size_bytes": self.astrbot_config.get("max_gif_size_bytes", 5 * 1024 * 1024),
                 "auto_render_3d": self.astrbot_config.get("auto_render_3d", True),
-                "auto_render_resolution": self.astrbot_config.get("auto_render_resolution", "800x600")
+                "auto_render_resolution": self.astrbot_config.get("auto_render_resolution", "7680x4320"),
+                "show_auto_render_hint": self.astrbot_config.get("show_auto_render_hint", True)
             }
         else:
             self.default_config: Dict[str, Union[List[str], int, str, bool]] = {
@@ -55,7 +56,8 @@ class Config:
                 "use_block_models": True,
                 "max_gif_size_bytes": 5 * 1024 * 1024,
                 "auto_render_3d": True,
-                "auto_render_resolution": "800x600"
+                "auto_render_resolution": "7680x4320",
+                "show_auto_render_hint": True
             }
         
         # 创建临时目录
@@ -140,4 +142,12 @@ class Config:
         Returns:
             str: 分辨率
         """
-        return self.get_config_value("auto_render_resolution", "800x600") 
+        return self.get_config_value("auto_render_resolution", "7680x4320")
+
+    def show_auto_render_hint(self) -> bool:
+        """检查是否显示自动渲染提示消息
+        
+        Returns:
+            bool: 是否显示提示
+        """
+        return self.get_config_value("show_auto_render_hint", True) 
