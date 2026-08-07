@@ -5,7 +5,7 @@ from typing import List, Dict, AsyncGenerator, Optional, Tuple
 
 from astrbot import logger
 from astrbot.api.event import filter, AstrMessageEvent, MessageChain
-from astrbot.api.message_components import Image, Node, Nodes, File, PlainText
+from astrbot.api.message_components import Image, Node, Nodes, File, Plain
 from astrbot.api.star import Star, register, Context
 from astrbot.core import AstrBotConfig
 
@@ -71,6 +71,35 @@ class LitematicPlugin(Star):
 
     @filter.command("投影", alias=["litematic"])
     async def litematic(self, event: AstrMessageEvent, category: str = "default") -> AsyncGenerator[MessageChain, None]:
+        # 检查是否为自动渲染模式切换命令
+        full_msg = event.get_message_str().strip()
+        msg_content = full_msg
+        if msg_content.startswith("/"):
+            msg_content = msg_content[1:]
+        for cmd_prefix in ["投影", "litematic"]:
+            if msg_content.startswith(cmd_prefix):
+                msg_content = msg_content[len(cmd_prefix):].strip()
+                break
+
+        if msg_content.startswith("自动渲染"):
+            parts = msg_content.split()
+            if len(parts) >= 2 and parts[1].lower() in ("3d", "2d"):
+                mode = parts[1].lower()
+                self.config.default_config["auto_render_mode"] = mode
+                mode_name = "3D 多视角渲染" if mode == "3d" else "2D 切片预览"
+                yield event.plain_result(f"自动渲染模式已切换为：{mode_name}")
+                return
+            else:
+                current_mode = self.config.get_auto_render_mode()
+                current_name = "3D 多视角渲染" if current_mode == "3d" else "2D 切片预览"
+                yield event.plain_result(
+                    f"当前自动渲染模式：{current_name}\n"
+                    f"使用方法：\n"
+                    f"/投影 自动渲染 3d  - 切换为 3D 多视角渲染\n"
+                    f"/投影 自动渲染 2d  - 切换为 2D 切片预览"
+                )
+                return
+
         async for response in self.upload_command.execute(event, category):
             yield response
 
@@ -132,51 +161,85 @@ class LitematicPlugin(Star):
             return
 
         target_path, category, filename = result
+        render_mode = self.config.get_auto_render_mode()
+
         if show_hint:
-            yield event.plain_result(f"已自动保存 {filename} 到 {category} 分类，正在渲染 3D 多视角...")
+            mode_hint = "3D 多视角" if render_mode == "3d" else "2D 切片预览"
+            yield event.plain_result(f"已自动保存 {filename} 到 {category} 分类，正在渲染 {mode_hint}...")
 
         try:
-            info_text = self._get_litematic_info(target_path, filename)
-
-            resolution = self.config.get_auto_render_resolution()
-            window_size = self._parse_resolution(resolution)
-
-            render_results = await self.render_3d_manager.render_multi_view_async(
-                target_path,
-                window_size=window_size,
-                native_textures=False
-            )
-
-            if not render_results:
-                yield event.plain_result("渲染失败，无法生成 3D 视图")
-                return
-
-            # 获取材料列表
-            material_list = await self.material_command.get_material_list(target_path)
-
-            nodes = []
-            # 将文件信息和材料列表作为第一个节点
-            info_text_full = f"【{filename}】\n{info_text}\n\n{material_list}"
-            nodes.append(Node(content=[PlainText(info_text_full)]))
-
-            for view_name, img_path in render_results:
-                try:
-                    nodes.append(Node(content=[Image.fromFileSystem(img_path)]))
-                except Exception as e:
-                    logger.error(f"添加 {view_name} 视图到合并转发消息失败: {e}")
-
-            if nodes:
-                message = MessageChain()
-                message.chain.append(Nodes(nodes=nodes))
-                yield message
-
-            self._cleanup_temp_files(render_results)
+            if render_mode == "2d":
+                await self._handle_auto_render_2d(event, target_path, filename)
+            else:
+                await self._handle_auto_render_3d(event, target_path, filename)
 
         except Exception as e:
             logger.error(f"自动渲染失败: {e}")
             import traceback
             logger.error(traceback.format_exc())
             yield event.plain_result(f"自动渲染失败: {str(e)}")
+
+    async def _handle_auto_render_2d(self, event: AstrMessageEvent, target_path: str, filename: str) -> AsyncGenerator[MessageChain, None]:
+        """2D 自动渲染：生成多角度切片预览并以合并转发发送"""
+        info_text = self._get_litematic_info(target_path, filename)
+        material_list = await self.material_command.get_material_list(target_path)
+
+        try:
+            img_path = await self.render_manager.render_litematic_async(
+                target_path, view_type="combined", scale=1, use_block_models=True
+            )
+
+            nodes = []
+            info_text_full = f"【{filename}】\n{info_text}\n\n{material_list}"
+            nodes.append(Node(content=[Plain(info_text_full)]))
+            nodes.append(Node(content=[Image.fromFileSystem(img_path)]))
+
+            message = MessageChain()
+            message.chain.append(Nodes(nodes=nodes))
+            yield message
+
+            if os.path.exists(img_path):
+                os.remove(img_path)
+
+        except Exception as e:
+            logger.error(f"2D 渲染失败: {e}")
+            yield event.plain_result(f"2D 渲染失败: {str(e)}")
+
+    async def _handle_auto_render_3d(self, event: AstrMessageEvent, target_path: str, filename: str) -> AsyncGenerator[MessageChain, None]:
+        """3D 自动渲染：生成多视角 8K 渲染图并以合并转发发送"""
+        info_text = self._get_litematic_info(target_path, filename)
+
+        resolution = self.config.get_auto_render_resolution()
+        window_size = self._parse_resolution(resolution)
+
+        render_results = await self.render_3d_manager.render_multi_view_async(
+            target_path,
+            window_size=window_size,
+            native_textures=False
+        )
+
+        if not render_results:
+            yield event.plain_result("渲染失败，无法生成 3D 视图")
+            return
+
+        material_list = await self.material_command.get_material_list(target_path)
+
+        nodes = []
+        info_text_full = f"【{filename}】\n{info_text}\n\n{material_list}"
+        nodes.append(Node(content=[Plain(info_text_full)]))
+
+        for view_name, img_path in render_results:
+            try:
+                nodes.append(Node(content=[Image.fromFileSystem(img_path)]))
+            except Exception as e:
+                logger.error(f"添加 {view_name} 视图到合并转发消息失败: {e}")
+
+        if nodes:
+            message = MessageChain()
+            message.chain.append(Nodes(nodes=nodes))
+            yield message
+
+        self._cleanup_temp_files(render_results)
 
     def _get_litematic_info(self, file_path: str, filename: str = "") -> str:
         if not LITEMAPY_AVAILABLE:

@@ -44,7 +44,8 @@ class Config:
                 "max_gif_size_bytes": self.astrbot_config.get("max_gif_size_bytes", 5 * 1024 * 1024),
                 "auto_render_3d": self.astrbot_config.get("auto_render_3d", True),
                 "auto_render_resolution": self.astrbot_config.get("auto_render_resolution", "7680x4320"),
-                "show_auto_render_hint": self.astrbot_config.get("show_auto_render_hint", True)
+                "show_auto_render_hint": self.astrbot_config.get("show_auto_render_hint", True),
+                "auto_render_mode": self.astrbot_config.get("auto_render_mode", "3d")
             }
         else:
             self.default_config: Dict[str, Union[List[str], int, str, bool]] = {
@@ -57,7 +58,8 @@ class Config:
                 "max_gif_size_bytes": 5 * 1024 * 1024,
                 "auto_render_3d": True,
                 "auto_render_resolution": "7680x4320",
-                "show_auto_render_hint": True
+                "show_auto_render_hint": True,
+                "auto_render_mode": "3d"
             }
         
         # 创建临时目录
@@ -150,4 +152,12 @@ class Config:
         Returns:
             bool: 是否显示提示
         """
-        return self.get_config_value("show_auto_render_hint", True) 
+        return self.get_config_value("show_auto_render_hint", True)
+
+    def get_auto_render_mode(self) -> str:
+        """获取自动渲染模式
+
+        Returns:
+            str: "3d" 或 "2d"
+        """
+        return self.get_config_value("auto_render_mode", "3d") 

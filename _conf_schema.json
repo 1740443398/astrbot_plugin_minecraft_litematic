@@ -40,5 +40,11 @@
         "type": "bool",
         "hint": "关闭后将不再显示\"检测到.litematic文件，正在自动处理...\"等提示消息，直接静默发送渲染结果",
         "default": true
+    },
+    "auto_render_mode": {
+        "description": "自动渲染模式",
+        "type": "string",
+        "hint": "自动识别 .litematic 文件后的默认渲染方式。3d：生成 5 个视角的 8K 3D 渲染图并以合并转发发送；2d：生成 2D 多角度切片预览图。也可通过 /投影 自动渲染 3d 或 /投影 自动渲染 2d 命令实时切换",
+        "default": "3d"
     }
 }
